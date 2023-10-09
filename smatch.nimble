@@ -1,0 +1,6 @@
+version       = "0.1.0"
+author        = "apropos"
+description   = "Experiments with simple structural pattern matching"
+license       = "0BSD"
+srcDir        = "src"
+requires "nim >= 2.0.0"

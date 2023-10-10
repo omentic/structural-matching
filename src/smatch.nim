@@ -17,14 +17,15 @@ type Pattern = ref object
     value: NimNode
   of kBinding: # a new binding.
     binding: NimNode
+    rebinding: Option[NimNode] # the "y" in `x as y`
   of kObject: # match named objects
-    objType: NimNode
-    objFields: seq[tuple[key: string, val: Pattern]]
-  of kTuple: # match unnamed tuples
-    tupFields: seq[tuple[key: Option[string], val: Pattern]]
+    objType: string
+    objFields: seq[Pattern]
   of kUnion: # match the special union type
     unionVariant: NimNode
     unionType: Pattern
+  of kTuple: # match unnamed tuples
+    tupFields: seq[Pattern]
   of kSeq: # match a sequence or array
     seqFields: seq[Pattern]
   of kSet: # match a set or table
@@ -34,13 +35,71 @@ type Pattern = ref object
 macro `of`*(expr: NimNode, patt: Pattern) =
   discard
 
-# todo: look into how matchImpl works. what should we generate?
-macro `case`*(n: NimNode): NimNode =
-  discard
+## Parse a NimNode into a proper Pattern.
+func parse(pattern: NimNode): Pattern =
+  case pattern.kind
+  of nnkCall: # objects and unions
+    Pattern(kind: kObject, objType: pattern[0].strVal, objFields: pattern[1 .. ^1].map(x => x.parse()))
+  of nnkTupleConstr: # tuples
+    Pattern(kind: kTuple, tupFields: pattern.children.toSeq.map(x => x.parse()))
+  of nnkBracket: # seqs and arrays
+    Pattern(kind: kSeq, seqFields: pattern.children.toSeq.map(x => x.parse()))
+  of nnkCurly: # sets
+    Pattern(kind: kSet, setFields: pattern.children.toSeq.map(x => x.parse()))
+  of nnkInfix: # bindings (usually?)
+    let infix = pattern[0]
+    if infix == ident("as"):
+      Pattern(kind: kBinding, binding: pattern[1], rebinding: some(pattern[2]))
+    else: # not the `as` infix, probably a value
+      Pattern(kind: kValue, value: pattern)
+  # todo: kRange
+  of nnkIdent: # discards, bindings, and values
+    if pattern == ident("_"):
+      Pattern(kind: kDiscard)
+    else: # todo: syntax sugar infix support (requires semantics)
+      Pattern(kind: kValue, value: pattern)
+  else: # values
+    Pattern(kind: kValue, value: pattern)
 
-# todo: necessary? for unions only? idk
-func `==`*(a, b: Pattern): bool =
-  discard
+func compile(pattern: Pattern): NimNode = discard
+
+# todo: what should we generate?
+macro `case`*(body: untyped): untyped =
+  case body.kind
+  of nnkCaseStmt:
+    let subject = body[0]
+    let cases = body[1 .. ^1]
+    for branch in cases:
+      case branch.kind
+      of nnkOfBranch:
+        let pattern = branch[0]
+        let body = branch[1]
+        discard
+        case pattern.kind
+        of nnkCommand: # match with `where` clause (probably)
+          let pattern_clause = pattern[0]
+          let where_clause = pattern[1]
+          if where_clause.kind != nnkCommand: # checks
+            error("bluh", where_clause)
+          if where_clause[0] != ident("where"):
+            error("bluh", where_clause[0])
+          let where_cond = where_clause[1]
+          let parsed = pattern_clause.parse()
+          # let compiled = parsed.compile()
+          # todo: inject
+        of nnkCall: # match with no `where` clause
+          let parsed = pattern.parse()
+          discard
+          # let compiled = parsed.compile()
+          # todo: inject
+        else: # match is a literal (probably)
+          discard
+      of nnkElifBranch, nnkElse:
+        discard # todo: inject
+      else:
+        error("invalid case branch", branch)
+  else:
+    error("not a case statement", body)
 
 func `$`*(pattern: Pattern): string =
   case pattern.kind
